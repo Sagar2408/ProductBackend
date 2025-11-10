@@ -1,28 +1,30 @@
 const express = require("express");
 const router = express.Router();
-
-// Import all controller functions
 const {
   createBill,
   getBills,
+  getBillsHistory,   // ✅ make sure ye import ho raha hai
   getBillById,
   getClientDetails,
   getProductDetails,
-  searchClients,
-  getClientByName
+  getClientByName,
 } = require("../controllers/billController");
 
-// 🧾 Bill routes
-router.post("/create", createBill);
-router.get("/all", getBills);
-router.get("/:id", getBillById);
+// 🔍 Search route — ye sabse upar rahe
+router.get("/search", getClientByName);
 
 // 👤 Auto-fill routes
 router.get("/client/details", getClientDetails);
 router.get("/product/details", getProductDetails);
 
-// 🔍 Search routes
-router.get("/search-clients", searchClients);
-router.get("/search", getClientByName);
+// 🧾 Bill routes
+router.post("/create", createBill);
+router.get("/all", getBills);
+
+// ✅ History route (ye /:id se PEHLE likhni hai)
+router.get("/history", getBillsHistory);
+
+// 👇 YE sabse last me rakho, warna conflict karega
+router.get("/:id", getBillById);
 
 module.exports = router;

@@ -12,7 +12,7 @@ exports.createBill = async (req, res) => {
       client_email,
       client_phone,
       item_id,
-      quantity, // in KG
+      quantity,
       cgst,
       sgst,
       payment_method,
@@ -20,23 +20,20 @@ exports.createBill = async (req, res) => {
 
     // 1️⃣ Validate Product
     const product = await Product.findByPk(item_id);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found!" });
-    }
+    if (!product) return res.status(404).json({ message: "Product not found!" });
 
-    // 2️⃣ Check stock (in KG)
+    // 2️⃣ Check Stock
     if (quantity > product.item_quantity) {
       return res.status(400).json({
         message: `Only ${product.item_quantity} kg available in stock!`,
       });
     }
 
-    // 3️⃣ Fetch Client Auto (via ID if provided)
+    // 3️⃣ Fetch Client (if existing)
     let finalClient = {};
     if (client_id) {
       const client = await User.findByPk(client_id);
-      if (!client)
-        return res.status(404).json({ message: "Client not found!" });
+      if (!client) return res.status(404).json({ message: "Client not found!" });
 
       finalClient = {
         client_name: client.name,
@@ -47,7 +44,7 @@ exports.createBill = async (req, res) => {
       finalClient = { client_name, client_email, client_phone };
     }
 
-    // 4️⃣ Total amount with GST
+    // 4️⃣ Calculate Total
     const baseAmount = product.item_rate * quantity;
     const cgstAmount = (baseAmount * (cgst || 0)) / 100;
     const sgstAmount = (baseAmount * (sgst || 0)) / 100;
@@ -68,36 +65,29 @@ exports.createBill = async (req, res) => {
       payment_method,
     });
 
-    // 6️⃣ Update product stock (reduce by sold quantity)
+    // 6️⃣ Update Stock
     await product.update({
       item_quantity: product.item_quantity - quantity,
     });
 
-    res.status(201).json({
-      message: "Bill created successfully ✅",
-      bill,
-    });
+    res.status(201).json({ message: "Bill created successfully ✅", bill });
   } catch (error) {
     console.error("Bill creation error:", error);
-    res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
   }
 };
 
 // 📄 Get All Bills
 exports.getBills = async (req, res) => {
   try {
-    const bills = await Bill.findAll({
-      order: [["createdAt", "DESC"]],
-    });
+    const bills = await Bill.findAll({ order: [["createdAt", "DESC"]] });
     res.status(200).json(bills);
   } catch (error) {
-    res.status(500).json({
-      message: "Failed to fetch bills",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch bills", error: error.message });
   }
 };
 
@@ -105,34 +95,31 @@ exports.getBills = async (req, res) => {
 exports.getBillById = async (req, res) => {
   try {
     const bill = await Bill.findByPk(req.params.id);
-    if (!bill)
-      return res.status(404).json({ message: "Bill not found!" });
+    if (!bill) return res.status(404).json({ message: "Bill not found!" });
     res.status(200).json(bill);
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching bill",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({ message: "Error fetching bill", error: error.message });
   }
 };
 
-// 👤 Auto Fetch Client Details (for frontend auto-fill)
+// 👤 Auto Fetch Client Details
 exports.getClientDetails = async (req, res) => {
   try {
     const { value } = req.query;
 
-    if (!value) {
+    if (!value)
       return res
         .status(400)
         .json({ message: "Please provide client name, email or phone" });
-    }
 
     const client = await User.findOne({
       where: {
         [Op.or]: [
-          { name: value },
-          { email: value },
-          { contactNumber: value },
+          { name: { [Op.like]: `%${value}%` } },
+          { email: { [Op.like]: `%${value}%` } },
+          { contactNumber: { [Op.like]: `%${value}%` } },
         ],
       },
     });
@@ -144,26 +131,24 @@ exports.getClientDetails = async (req, res) => {
       name: client.name,
       email: client.email,
       phone: client.contactNumber,
+      companyName: client.companyName,
+      companyAddress: client.companyAddress,
     });
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching client details",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({ message: "Error fetching client details", error: error.message });
   }
 };
 
-// 📦 Auto Fetch Product Details (for frontend auto-fill)
+// 📦 Auto Fetch Product Details
 exports.getProductDetails = async (req, res) => {
   try {
     const { item_id } = req.query;
-
-    if (!item_id) {
+    if (!item_id)
       return res.status(400).json({ message: "Please provide item ID" });
-    }
 
     const product = await Product.findByPk(item_id);
-
     if (!product)
       return res.status(404).json({ message: "Product not found!" });
 
@@ -173,66 +158,81 @@ exports.getProductDetails = async (req, res) => {
       available_quantity: product.item_quantity,
     });
   } catch (error) {
-    res.status(500).json({
-      message: "Error fetching product details",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({ message: "Error fetching product details", error: error.message });
   }
 };
 
-// 🔍 Search clients by name (autocomplete)
-exports.searchClients = async (req, res) => {
+// 🔍 Client Autocomplete Search
+exports.getClientByName = async (req, res) => {
   try {
     const { name } = req.query;
+
     if (!name || name.trim() === "") {
-      return res.status(400).json({ message: "Name query is required" });
+      return res.status(400).json({ message: "Client name is required" });
     }
 
-    const clients = await User.findAll({
-      where: {
-        name: { [Op.like]: `%${name}%` },
-      },
-      attributes: ["id", "name", "email", "contactNumber"],
-    });
-
-    if (clients.length === 0) {
-      return res.status(404).json({ message: "No clients found!" });
-    }
-
-    res.status(200).json(clients);
-  } catch (error) {
-    console.error("Error searching clients:", error);
-    res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
-
-// 🔍 Search clients by name (case-insensitive & partial match)
-exports.getClientByName = async (req, res) => {
-  const { name } = req.query;
-
-  if (!name || name.trim() === "") {
-    return res.status(400).json({ message: "Name is required" });
-  }
-
-  try {
     const clients = await User.findAll({
       where: {
         role: "client",
-        name: { [Op.like]: `%${name}%` }, // partial match
+        name: { [Op.like]: `%${name}%` },
       },
-      attributes: ["id", "name", "email", "contactNumber", "companyName", "companyAddress"],
+      attributes: [
+        "id",
+        "name",
+        "email",
+        "contactNumber",
+        "companyName",
+        "companyAddress",
+      ],
+      limit: 10,
     });
 
     if (clients.length === 0) {
       return res.status(404).json({ message: "No matching clients found" });
     }
 
-    res.json(clients);
-  } catch (err) {
-    console.error("Error fetching clients:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    res.status(200).json(clients);
+  } catch (error) {
+    console.error("Error fetching clients:", error);
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
+  }
+};
+
+// 📜 Get Bill History (for admin)
+exports.getBillsHistory = async (req, res) => {
+  try {
+    const bills = await Bill.findAll({
+      order: [["createdAt", "DESC"]], // latest first
+      attributes: [
+        "bill_id",
+        "client_name",
+        "client_email",
+        "client_phone",
+        "item_name",
+        "item_rate",
+        "quantity",
+        "cgst",
+        "sgst",
+        "total_amount",
+        "payment_method",
+        "createdAt",
+      ],
+    });
+
+    if (!bills || bills.length === 0) {
+      return res.status(404).json({ message: "No bills found!" });
+    }
+
+    res.status(200).json(bills);
+  } catch (error) {
+    console.error("Error fetching bill history:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
