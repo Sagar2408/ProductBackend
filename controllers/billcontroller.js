@@ -236,3 +236,49 @@ exports.getBillsHistory = async (req, res) => {
     });
   }
 };
+
+// 📦 Get Bills by Logged-in Client (Client Dashboard)
+exports.getClientBills = async (req, res) => {
+  try {
+    // Token se user info aa rahi hai (authMiddleware se)
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized - No user found in token" });
+    }
+
+    // User verify karo
+    const user = await User.findByPk(userId);
+    if (!user || user.role !== "client") {
+      return res.status(403).json({ message: "Access denied - Not a client" });
+    }
+
+    // Ab is user ke email ke hisaab se bill fetch karo
+    const bills = await Bill.findAll({
+      where: { client_email: user.email },
+      order: [["createdAt", "DESC"]],
+      attributes: [
+        "bill_id",
+        "item_name",
+        "item_rate",
+        "quantity",
+        "cgst",
+        "sgst",
+        "total_amount",
+        "payment_method",
+        "createdAt",
+      ],
+    });
+
+    if (bills.length === 0) {
+      return res.status(200).json({ message: "No bills found for this client." });
+    }
+
+    res.status(200).json({ client: user.name, bills });
+  } catch (error) {
+    console.error("Error fetching client bills:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
